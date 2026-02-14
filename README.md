@@ -2,8 +2,8 @@
 
 <div align="center">
 
-![GitHub stars](https://img.shields.io/github/stars/KimYx0207/Claude-Code-Guide-Zh?style=social)
-![GitHub forks](https://img.shields.io/github/forks/KimYx0207/Claude-Code-Guide-Zh?style=social)
+![GitHub stars](https://img.shields.io/github/stars/KimYx0207/agent-teams-playbook?style=social)
+![GitHub forks](https://img.shields.io/github/forks/KimYx0207/agent-teams-playbook?style=social)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Version](https://img.shields.io/badge/Claude_Code-2.1.39-green.svg)
 
