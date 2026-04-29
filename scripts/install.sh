@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 
 # agent-teams-playbook Installation Script
-# Version: V4.5
-# Description: Installs the agent-teams-playbook Claude Code Skill
+# Version: V4.7
+# Description: Installs the agent-teams-playbook Skill for Claude Code, Codex, OpenClaw, or Cursor
 # Note: "swarm/蜂群" is generic; Claude Code's official concept is "Agent Teams"
 
 set -e
 
-VERSION="V4.5"
+VERSION="V4.7"
 SKILL_NAME="agent-teams-playbook"
 GITHUB_REPO="KimYx0207/agent-teams-playbook"
 GITHUB_BRANCH="main"
-INSTALL_DIR="${HOME}/.claude/skills/${SKILL_NAME}"
+INSTALL_TARGET="claude"
+INSTALL_SOURCE="local"
+
+CLAUDE_SKILLS_DIR="${CLAUDE_SKILLS_DIR:-${HOME}/.claude/skills}"
+CODEX_SKILLS_DIR="${CODEX_SKILLS_DIR:-${HOME}/.codex/skills}"
+OPENCLAW_SKILLS_DIR="${OPENCLAW_SKILLS_DIR:-${HOME}/.agents/skills}"
+CURSOR_SKILLS_DIR="${CURSOR_SKILLS_DIR:-${HOME}/.cursor/skills}"
 
 # Color codes
 RED='\033[0;31m'
@@ -51,20 +57,29 @@ USAGE:
     ./install.sh [OPTIONS]
 
 OPTIONS:
-    -h, --help      Show this help message
-    -v, --version   Show version information
+    -h, --help              Show this help message
+    -v, --version           Show version information
+    -t, --target TARGET     Install target: claude, codex, openclaw, cursor, all
+    --from-github           Download SKILL.md and README.md from GitHub main.
+                            Default: copy from the local checkout.
 
 DESCRIPTION:
-    Installs the agent-teams-playbook Claude Code Skill by:
+    Installs the agent-teams-playbook Skill by:
     1. Detecting your operating system
     2. Creating the installation directory
-    3. Downloading SKILL.md and README.md from GitHub
+    3. Copying SKILL.md and README.md from the local checkout
+       or downloading them from GitHub with --from-github
     4. Verifying the installation
-    5. Optionally enabling fork mode
+    5. Optionally enabling Claude Code fork mode
 
 EXAMPLES:
-    ./install.sh                # Run interactive installation
-    ./install.sh --help         # Show this help message
+    ./install.sh                         # Install for Claude Code
+    ./install.sh --target codex          # Install for Codex
+    ./install.sh --target openclaw       # Install for OpenClaw
+    ./install.sh --target cursor         # Install for Cursor
+    ./install.sh --target all            # Install for all supported targets
+    ./install.sh --target all --from-github
+    CODEX_SKILLS_DIR=/path/to/skills ./install.sh --target codex
 
 EOF
 }
@@ -74,8 +89,8 @@ show_version() {
 }
 
 # Parse command line arguments
-for arg in "$@"; do
-    case $arg in
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         -h|--help)
             show_help
             exit 0
@@ -84,13 +99,42 @@ for arg in "$@"; do
             show_version
             exit 0
             ;;
+        -t|--target)
+            if [[ -z "${2:-}" ]]; then
+                print_error "--target requires a value"
+                exit 1
+            fi
+            INSTALL_TARGET="$2"
+            shift
+            ;;
+        --target=*)
+            INSTALL_TARGET="${1#*=}"
+            ;;
+        --from-github)
+            INSTALL_SOURCE="github"
+            ;;
         *)
-            print_error "Unknown option: $arg"
+            print_error "Unknown option: $1"
             echo "Use --help for usage information"
             exit 1
             ;;
     esac
+    shift
 done
+
+target_dir() {
+    case "$1" in
+        claude) echo "${CLAUDE_SKILLS_DIR}/${SKILL_NAME}" ;;
+        codex) echo "${CODEX_SKILLS_DIR}/${SKILL_NAME}" ;;
+        openclaw) echo "${OPENCLAW_SKILLS_DIR}/${SKILL_NAME}" ;;
+        cursor) echo "${CURSOR_SKILLS_DIR}/${SKILL_NAME}" ;;
+        *)
+            print_error "Unsupported target: $1" >&2
+            print_error "Supported targets: claude, codex, openclaw, cursor, all" >&2
+            return 1
+            ;;
+    esac
+}
 
 # Feature 1: OS Detection
 detect_os() {
@@ -123,11 +167,12 @@ detect_os() {
 
 # Feature 2: Directory Creation
 create_directory() {
+    local install_dir="$1"
     print_header "Step 2: Creating Installation Directory"
 
-    print_info "Target directory: ${INSTALL_DIR}"
+    print_info "Target directory: ${install_dir}"
 
-    if [ -d "${INSTALL_DIR}" ]; then
+    if [ -d "${install_dir}" ]; then
         print_warning "Directory already exists!"
         echo
         read -p "Do you want to overwrite the existing installation? (y/N): " -n 1 -r
@@ -139,16 +184,45 @@ create_directory() {
         fi
 
         print_info "Removing existing directory..."
-        rm -rf "${INSTALL_DIR}"
+        rm -rf "${install_dir}"
     fi
 
-    mkdir -p "${INSTALL_DIR}"
+    mkdir -p "${install_dir}"
     print_success "Directory created successfully"
     echo
 }
 
 # Feature 3: File Download
+copy_local_files() {
+    local install_dir="$1"
+    print_header "Step 3: Copying Files from Local Checkout"
+
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local repo_dir
+    repo_dir="$(cd "${script_dir}/.." && pwd)"
+    local files=("SKILL.md" "README.md")
+
+    for file in "${files[@]}"; do
+        local source="${repo_dir}/${file}"
+        local output="${install_dir}/${file}"
+
+        print_info "Copying ${file}..."
+
+        if [ ! -f "${source}" ]; then
+            print_error "Local source file not found: ${source}"
+            exit 1
+        fi
+
+        cp "${source}" "${output}"
+        print_success "${file} copied successfully"
+    done
+
+    echo
+}
+
 download_files() {
+    local install_dir="$1"
     print_header "Step 3: Downloading Files from GitHub"
 
     local base_url="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}"
@@ -171,7 +245,7 @@ download_files() {
 
     for file in "${files[@]}"; do
         local url="${base_url}/${file}"
-        local output="${INSTALL_DIR}/${file}"
+        local output="${install_dir}/${file}"
 
         print_info "Downloading ${file}..."
 
@@ -199,13 +273,14 @@ download_files() {
 
 # Feature 4: Installation Verification
 verify_installation() {
+    local install_dir="$1"
     print_header "Step 4: Verifying Installation"
 
     local files=("SKILL.md" "README.md")
     local all_valid=true
 
     for file in "${files[@]}"; do
-        local filepath="${INSTALL_DIR}/${file}"
+        local filepath="${install_dir}/${file}"
 
         if [ ! -f "${filepath}" ]; then
             print_error "${file} does not exist"
@@ -233,6 +308,16 @@ verify_installation() {
 
 # Feature 5: Fork Mode Prompt
 configure_fork_mode() {
+    local install_dir="$1"
+    local target="$2"
+
+    if [ "${target}" != "claude" ]; then
+        print_header "Step 5: Fork Mode Configuration"
+        print_info "Fork mode is a Claude Code-specific frontmatter option; skipping for ${target}."
+        echo
+        return 0
+    fi
+
     print_header "Step 5: Fork Mode Configuration"
 
     print_info "Fork mode runs the skill in an isolated context."
@@ -244,7 +329,7 @@ configure_fork_mode() {
     echo
 
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        local skill_file="${INSTALL_DIR}/SKILL.md"
+        local skill_file="${install_dir}/SKILL.md"
 
         # Check if context: fork already exists
         if grep -q "^context:" "${skill_file}"; then
@@ -284,26 +369,54 @@ main() {
     echo
 
     detect_os
-    create_directory
-    download_files
 
-    if verify_installation; then
-        configure_fork_mode
+    local targets=()
+    case "${INSTALL_TARGET}" in
+        all)
+            targets=("claude" "codex" "openclaw" "cursor")
+            ;;
+        claude|codex|openclaw|cursor)
+            targets=("${INSTALL_TARGET}")
+            ;;
+        *)
+            print_error "Unsupported target: ${INSTALL_TARGET}"
+            print_error "Supported targets: claude, codex, openclaw, cursor, all"
+            exit 1
+            ;;
+    esac
 
-        print_header "Installation Complete!"
-        print_success "agent-teams-playbook skill installed successfully"
-        echo
-        print_info "Installation location: ${INSTALL_DIR}"
-        print_info "You can now use the skill in Claude Code"
-        echo
-        print_info "To verify, check:"
-        print_info "  - ${INSTALL_DIR}/SKILL.md"
-        print_info "  - ${INSTALL_DIR}/README.md"
-        echo
-    else
-        print_error "Installation failed during verification"
-        exit 1
-    fi
+    local installed_locations=()
+
+    for target in "${targets[@]}"; do
+        local install_dir
+        install_dir=$(target_dir "${target}") || exit 1
+
+        print_header "Installing for ${target}"
+        create_directory "${install_dir}"
+
+        if [ "${INSTALL_SOURCE}" = "github" ]; then
+            download_files "${install_dir}"
+        else
+            copy_local_files "${install_dir}"
+        fi
+
+        if verify_installation "${install_dir}"; then
+            configure_fork_mode "${install_dir}" "${target}"
+            installed_locations+=("${target}: ${install_dir}")
+        else
+            print_error "Installation failed during verification for ${target}"
+            exit 1
+        fi
+    done
+
+    print_header "Installation Complete!"
+    print_success "agent-teams-playbook skill installed successfully"
+    echo
+    print_info "Installation locations:"
+    for location in "${installed_locations[@]}"; do
+        print_info "  - ${location}"
+    done
+    echo
 }
 
 # Run main installation
